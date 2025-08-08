@@ -1,16 +1,33 @@
-import 'package:flame_game/game_over.dart';
 import 'package:flutter/material.dart';
 import 'package:flame/game.dart';
 import 'shooter_game.dart';
+import 'game_over.dart';
 
 void main() {
   final game = ShooterGame();
+
   runApp(
     MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
+        // backgroundColor: Colors.white,
         body: Stack(
           children: [
+            // Background
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFFFFFFFF), // Pure white
+                    Color(0xFFF5F5F5), // Very light gray
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+
+            // Game widget
             GameWidget(
               game: game,
               overlayBuilderMap: {
@@ -18,23 +35,39 @@ void main() {
               },
             ),
 
-            // Left Arrow Button
+            // Left movement button
             Positioned(
               left: 20,
               bottom: 20,
-              child: ElevatedButton(
-                onPressed: () => game.movePlayerLeft(),
-                child: const Icon(Icons.arrow_left),
+              child: CircleAvatar(
+                backgroundColor: Colors.white.withOpacity(0.15),
+                radius: 32,
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.arrow_circle_left_sharp,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  onPressed: () => game.movePlayerLeft(),
+                ),
               ),
             ),
 
-            // Right Arrow Button
+            // Right movement button
             Positioned(
               right: 20,
               bottom: 20,
-              child: ElevatedButton(
-                onPressed: () => game.movePlayerRight(),
-                child: const Icon(Icons.arrow_right),
+              child: CircleAvatar(
+                backgroundColor: Colors.white.withOpacity(0.15),
+                radius: 32,
+                child: IconButton(
+                  icon: const Icon(
+                    Icons.arrow_circle_right_sharp,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  onPressed: () => game.movePlayerRight(),
+                ),
               ),
             ),
           ],
