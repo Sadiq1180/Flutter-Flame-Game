@@ -1,4 +1,5 @@
 // shooter_game.dart
+import 'dart:async';
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -10,9 +11,15 @@ import 'player.dart';
 import 'enemy.dart';
 import 'bullet.dart';
 
+enum GameState { mainMenu, playing, paused, gameOver }
+
 class ShooterGame extends FlameGame with TapDetector {
   late Player player;
   late GameUI gameUI;
+
+  final StreamController<GameState> _gameStateController =
+      StreamController<GameState>.broadcast();
+  Stream<GameState> get gameStateStream => _gameStateController.stream;
 
   final Random _random = Random();
   double enemySpawnTimer = 0;
@@ -23,7 +30,12 @@ class ShooterGame extends FlameGame with TapDetector {
 
   int score = 0;
   int health = 5;
-  bool gameOver = false;
+  GameState gameState = GameState.mainMenu;
+  double playerSpeed = 300.0;
+
+  // Player movement state
+  bool isMovingLeft = false;
+  bool isMovingRight = false;
 
   final List<Bullet> _activeBullets = [];
   final List<Enemy> _activeEnemies = [];
@@ -35,12 +47,19 @@ class ShooterGame extends FlameGame with TapDetector {
 
     gameUI = GameUI();
     await add(gameUI);
+
+    // Show main menu initially
+    _showMainMenu();
   }
 
   @override
   void update(double dt) {
-    if (gameOver) return;
     super.update(dt);
+
+    if (gameState != GameState.playing) return;
+
+    // Handle smooth player movement
+    _updatePlayerMovement(dt);
 
     bulletTimer += dt;
     if (bulletTimer >= bulletInterval) {
@@ -62,14 +81,25 @@ class ShooterGame extends FlameGame with TapDetector {
     _removeOffScreenObjects();
 
     if (health <= 0) {
-      gameOver = true;
+      gameState = GameState.gameOver;
       _showGameOver();
     }
 
     // Update UI
     gameUI.updateScore(score);
     gameUI.updateHealth(health);
-    gameUI.updateGameState(gameOver);
+    gameUI.updateGameState(gameState);
+  }
+
+  void _updatePlayerMovement(double dt) {
+    if (isMovingLeft && !isMovingRight) {
+      player.position.x = max(0, player.position.x - playerSpeed * dt);
+    } else if (isMovingRight && !isMovingLeft) {
+      player.position.x = min(
+        size.x - player.size.x,
+        player.position.x + playerSpeed * dt,
+      );
+    }
   }
 
   void _updateActiveLists() {
@@ -91,7 +121,7 @@ class ShooterGame extends FlameGame with TapDetector {
           bulletsToRemove.add(bullet);
           enemiesToRemove.add(enemy);
           score += 10;
-          gameUI.triggerScoreEffect(); // Trigger score animation
+          gameUI.triggerScoreEffect();
           break;
         }
       }
@@ -101,7 +131,7 @@ class ShooterGame extends FlameGame with TapDetector {
       if (player.toRect().overlaps(enemy.toRect())) {
         enemiesToRemove.add(enemy);
         health--;
-        gameUI.triggerDamageEffect(); // Trigger damage animation
+        gameUI.triggerDamageEffect();
         break;
       }
     }
@@ -146,8 +176,36 @@ class ShooterGame extends FlameGame with TapDetector {
     add(enemy);
   }
 
+  // Menu system methods
+  void _showMainMenu() {
+    overlays.add('MainMenu');
+  }
+
   void _showGameOver() {
     overlays.add('GameOverMenu');
+  }
+
+  void _showPauseMenu() {
+    overlays.add('PauseMenu');
+  }
+
+  void startGame() {
+    gameState = GameState.playing;
+    overlays.remove('MainMenu');
+  }
+
+  void pauseGame() {
+    if (gameState == GameState.playing) {
+      gameState = GameState.paused;
+      _showPauseMenu();
+    }
+  }
+
+  void resumeGame() {
+    if (gameState == GameState.paused) {
+      gameState = GameState.playing;
+      overlays.remove('PauseMenu');
+    }
   }
 
   void restartGame() {
@@ -156,36 +214,73 @@ class ShooterGame extends FlameGame with TapDetector {
 
     score = 0;
     health = 5;
-    gameOver = false;
+    gameState = GameState.playing;
     spawnInterval = 2.0;
     bulletTimer = 0;
     enemySpawnTimer = 0;
+    isMovingLeft = false;
+    isMovingRight = false;
 
     overlays.remove('GameOverMenu');
+    overlays.remove('PauseMenu');
   }
 
-  void movePlayerLeft() {
-    if (!gameOver) player.position.x = max(0, player.position.x - 50);
+  void backToMainMenu() {
+    children.whereType<Bullet>().forEach((b) => b.removeFromParent());
+    children.whereType<Enemy>().forEach((e) => e.removeFromParent());
+
+    score = 0;
+    health = 5;
+    gameState = GameState.mainMenu;
+    spawnInterval = 2.0;
+    bulletTimer = 0;
+    enemySpawnTimer = 0;
+    isMovingLeft = false;
+    isMovingRight = false;
+
+    overlays.remove('GameOverMenu');
+    overlays.remove('PauseMenu');
+    _showMainMenu();
   }
 
-  void movePlayerRight() {
-    if (!gameOver) {
-      player.position.x = min(size.x - player.size.x, player.position.x + 50);
+  // Improved player movement methods
+  void startMovingLeft() {
+    if (gameState == GameState.playing) {
+      isMovingLeft = true;
     }
+  }
+
+  void stopMovingLeft() {
+    isMovingLeft = false;
+  }
+
+  void startMovingRight() {
+    if (gameState == GameState.playing) {
+      isMovingRight = true;
+    }
+  }
+
+  void stopMovingRight() {
+    isMovingRight = false;
   }
 
   @override
   void onTapDown(TapDownInfo info) {
-    if (gameOver) {
+    if (gameState == GameState.gameOver) {
       restartGame();
       return;
     }
+
+    if (gameState != GameState.playing) return;
+
     final tapX = info.eventPosition.global.x;
     final playerCenter = player.position.x + player.size.x / 2;
+
+    // For tap controls, we'll do instant movement with smaller steps
     if (tapX < playerCenter) {
-      movePlayerLeft();
+      player.position.x = max(0, player.position.x - 50);
     } else {
-      movePlayerRight();
+      player.position.x = min(size.x - player.size.x, player.position.x + 50);
     }
   }
 }
@@ -199,7 +294,7 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
 
   int _currentScore = 0;
   int _currentHealth = 3;
-  bool _gameOver = false;
+  GameState _gameState = GameState.mainMenu;
 
   // Animation properties
   double _scoreScaleAnimation = 1.0;
@@ -214,12 +309,11 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
 
   @override
   Future<void> onLoad() async {
-    priority = 100; // Ensure UI renders on top
+    priority = 100;
     _initializePaints();
   }
 
   void _initializePaints() {
-    // Semi-transparent background for UI panels
     _backgroundPaint =
         Paint()
           ..shader = LinearGradient(
@@ -233,7 +327,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ).createShader(Rect.fromLTWH(0, 0, 400, 100))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
 
-    // Score panel with cyan glow
     _scorePanelPaint =
         Paint()
           ..shader = LinearGradient(
@@ -247,7 +340,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ).createShader(Rect.fromLTWH(0, 0, 200, 50))
           ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 2);
 
-    // Health panel with red glow when low
     _healthPanelPaint =
         Paint()
           ..shader = LinearGradient(
@@ -261,7 +353,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ).createShader(Rect.fromLTWH(0, 0, 200, 50))
           ..maskFilter = const MaskFilter.blur(BlurStyle.outer, 2);
 
-    // Health bar
     _healthBarPaint =
         Paint()
           ..shader = LinearGradient(
@@ -274,7 +365,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
             end: Alignment.centerRight,
           ).createShader(Rect.fromLTWH(0, 0, 150, 8));
 
-    // Health bar background
     _healthBarBgPaint =
         Paint()
           ..color = const Color(0xFF333333)
@@ -285,36 +375,45 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
   void render(Canvas canvas) {
     if (gameRef.size == Vector2.zero()) return;
 
-    canvas.save();
+    // Only show UI when playing or paused
+    if (_gameState == GameState.playing || _gameState == GameState.paused) {
+      canvas.save();
 
-    // Draw top UI background gradient
-    _drawUIBackground(canvas);
+      _drawUIBackground(canvas);
+      _drawScorePanel(canvas);
+      _drawHealthPanel(canvas);
+      _drawHealthBar(canvas);
 
-    // Draw score panel
-    _drawScorePanel(canvas);
+      // Show pause indicator when paused
+      if (_gameState == GameState.paused) {
+        _drawPauseIndicator(canvas);
+      }
 
-    // Draw health panel
-    _drawHealthPanel(canvas);
-
-    // Draw health bar
-    _drawHealthBar(canvas);
-
-    // Draw game over overlay if needed
-    if (_gameOver) {
-      _drawGameOverOverlay(
-        canvas,
-      ); /////////////////////////////////////////////////
+      canvas.restore();
     }
+  }
+
+  void _drawPauseIndicator(Canvas canvas) {
+    canvas.save();
+    canvas.translate(gameRef.size.x / 2, 150);
+
+    _drawText(
+      canvas,
+      'PAUSED',
+      Offset.zero,
+      const Color(0xFFFFFF00),
+      32,
+      FontWeight.bold,
+      textAlign: TextAlign.center,
+    );
 
     canvas.restore();
   }
 
-  ///score ui
   void _drawUIBackground(Canvas canvas) {
     final bgRect = Rect.fromLTWH(0, 0, gameRef.size.x, 120);
     canvas.drawRect(bgRect, _backgroundPaint);
 
-    // Add subtle scan lines effect
     final scanLinePaint =
         Paint()
           ..color = const Color(0xFF00FFFF).withOpacity(0.1)
@@ -331,7 +430,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
     }
   }
 
-  //this is score panel
   void _drawScorePanel(Canvas canvas) {
     final panelWidth = 150.0;
     final panelHeight = 45.0;
@@ -340,7 +438,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       const Radius.circular(12),
     );
 
-    // Animate panel glow based on score changes
     final glowIntensity = 0.5 + math.sin(_scoreGlowAnimation * 8) * 0.3;
     final glowPaint =
         Paint()
@@ -353,7 +450,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ).createShader(Rect.fromLTWH(20, 20, panelWidth, panelHeight))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
 
-    // Draw glow
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(15, 15, panelWidth + 10, panelHeight + 10),
@@ -362,10 +458,8 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       glowPaint,
     );
 
-    // Draw panel background
     canvas.drawRRect(panelRect, _scorePanelPaint);
 
-    // Draw border
     final borderPaint =
         Paint()
           ..color = const Color(0xFF00FFFF).withOpacity(0.8)
@@ -373,12 +467,10 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ..strokeWidth = 2;
     canvas.drawRRect(panelRect, borderPaint);
 
-    // Draw score text with scale animation
     canvas.save();
     canvas.translate(100, 42.5);
     canvas.scale(_scoreScaleAnimation);
 
-    // Score label
     _drawText(
       canvas,
       'SCORE',
@@ -388,7 +480,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       FontWeight.bold,
     );
 
-    // Score value
     _drawText(
       canvas,
       _formatScore(_currentScore),
@@ -401,7 +492,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
     canvas.restore();
   }
 
-  ////this is health panel
   void _drawHealthPanel(Canvas canvas) {
     final panelWidth = 150.0;
     final panelHeight = 45.0;
@@ -411,11 +501,9 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       const Radius.circular(12),
     );
 
-    // Health-based color intensity
-    final healthRatio = _currentHealth / 3.0;
+    final healthRatio = _currentHealth / 5.0;
     final isLowHealth = healthRatio <= 0.33;
 
-    // Pulsing red effect when health is low
     double pulseIntensity = 0.5;
     if (isLowHealth) {
       pulseIntensity += math.sin(_healthPulseAnimation * 10) * 0.4;
@@ -434,7 +522,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ).createShader(Rect.fromLTWH(panelX, 20, panelWidth, panelHeight))
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
 
-    // Draw glow
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(panelX - 5, 15, panelWidth + 10, panelHeight + 10),
@@ -443,10 +530,8 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       glowPaint,
     );
 
-    // Draw panel background
     canvas.drawRRect(panelRect, _healthPanelPaint);
 
-    // Draw border with health-based color
     final borderPaint =
         Paint()
           ..color = (isLowHealth
@@ -457,16 +542,13 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
           ..strokeWidth = 2;
     canvas.drawRRect(panelRect, borderPaint);
 
-    // Draw health text
     canvas.save();
     canvas.translate(panelX + panelWidth / 2, 42.5);
 
-    // Add damage flash effect
     if (_damageFlashAnimation > 0) {
       canvas.scale(1.0 + _damageFlashAnimation * 0.1);
     }
 
-    // Health label
     _drawText(
       canvas,
       'LIVES',
@@ -476,7 +558,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       FontWeight.bold,
     );
 
-    // Health value
     _drawText(
       canvas,
       '${_currentHealth}/5',
@@ -489,14 +570,12 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
     canvas.restore();
   }
 
-  ///// Health
   void _drawHealthBar(Canvas canvas) {
     final barWidth = 150.0;
     final barHeight = 15.0;
-    final barX = gameRef.size.x - 150 - 20; // Align with health panel
-    final barY = 80.0; // Move down to avoid overlap
+    final barX = gameRef.size.x - 150 - 20;
+    final barY = 80.0;
 
-    // Background
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(barX, barY, barWidth, barHeight),
@@ -505,11 +584,9 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       _healthBarBgPaint,
     );
 
-    // Health fill
     final healthRatio = _currentHealth / 5.0;
     final fillWidth = barWidth * healthRatio;
 
-    // Color changes based on health
     Color healthColor;
     if (healthRatio > 0.66) {
       healthColor = const Color(0xFF00FF88);
@@ -538,7 +615,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       );
     }
 
-    // Health bar border
     final borderPaint =
         Paint()
           ..color = Colors.white.withOpacity(0.6)
@@ -552,57 +628,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       ),
       borderPaint,
     );
-  }
-
-  void _drawGameOverOverlay(Canvas canvas) {
-    // Semi-transparent overlay
-    final overlayPaint = Paint()..color = Colors.black.withOpacity(0.8);
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, gameRef.size.x, gameRef.size.y),
-      overlayPaint,
-    );
-
-    // Game Over text with glow effect
-    canvas.save();
-    canvas.translate(gameRef.size.x / 2, gameRef.size.y / 2 - 50);
-
-    final glowPaint =
-        Paint()
-          ..color = const Color(0xFFFF4444)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-
-    _drawText(
-      canvas,
-      'GAME OVER',
-      Offset.zero,
-      Colors.white,
-      48,
-      FontWeight.w900,
-      textAlign: TextAlign.center,
-      glowPaint: glowPaint,
-    );
-
-    _drawText(
-      canvas,
-      'Final Score: ${_formatScore(_currentScore)}',
-      const Offset(0, 50),
-      const Color(0xFF88DDFF),
-      24,
-      FontWeight.bold,
-      textAlign: TextAlign.center,
-    );
-
-    _drawText(
-      canvas,
-      'Tap to restart',
-      const Offset(0, 100),
-      Colors.white.withOpacity(0.7),
-      18,
-      FontWeight.normal,
-      textAlign: TextAlign.center,
-    );
-
-    canvas.restore();
   }
 
   void _drawText(
@@ -635,7 +660,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       offset.dy - textPainter.height / 2,
     );
 
-    // Draw glow effect if provided
     if (glowPaint != null) {
       textPainter.paint(canvas, textOffset);
     }
@@ -652,7 +676,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
     super.update(dt);
     _uiTime += dt;
 
-    // Update score effect animation
     if (_scoreEffectTimer > 0) {
       _scoreEffectTimer -= dt;
       _scoreScaleAnimation = 1.0 + (1.0 - _scoreEffectTimer / 0.3) * 0.2;
@@ -664,7 +687,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       }
     }
 
-    // Update damage effect animation
     if (_damageEffectTimer > 0) {
       _damageEffectTimer -= dt;
       _damageFlashAnimation = _damageEffectTimer / 0.2;
@@ -674,7 +696,6 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
       }
     }
 
-    // Update health pulse animation
     _healthPulseAnimation += dt;
   }
 
@@ -686,8 +707,8 @@ class GameUI extends PositionComponent with HasGameRef<FlameGame> {
     _currentHealth = health;
   }
 
-  void updateGameState(bool gameOver) {
-    _gameOver = gameOver;
+  void updateGameState(GameState gameState) {
+    _gameState = gameState;
   }
 
   void triggerScoreEffect() {
